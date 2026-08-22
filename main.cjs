@@ -78,10 +78,15 @@ async function formatCard(source, label) {
   // Explicit confirmation happens in the renderer before this IPC call.
   await command('pkexec', ['umount', source]);
   await command('pkexec', ['mkfs.vfat', '-F', '32', '-n', label, source]);
-  const { stdout } = await command('udisksctl', ['mount', '-b', source]);
-  const match = stdout.match(/ at (.+)\.$/m);
-  if (!match) throw new Error('The card was formatted, but could not be mounted again.');
-  return match[1].trim();
+  const { stdout, stderr } = await command('udisksctl', ['mount', '-b', source]);
+  const output = `${stdout}\n${stderr}`;
+  const match = output.match(/\bat\s+(.+?)(?:\.\s*)?$/m);
+  if (match?.[1]?.trim()) return match[1].trim();
+  try {
+    const mounted = await command('findmnt', ['-no', 'TARGET', '-S', source]);
+    if (mounted.stdout.trim()) return mounted.stdout.trim();
+  } catch { /* report the useful installer error below */ }
+  throw new Error(`The card was formatted, but could not be mounted again. ${output.trim()}`);
 }
 async function install({ deviceId, card, source, confirmed }) {
   if (!confirmed) throw new Error('Formatting was not confirmed.');
