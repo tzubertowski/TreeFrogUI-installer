@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
@@ -32,6 +33,35 @@ async function download(url, target) {
   const data = Buffer.from(await response.arrayBuffer());
   if (data.length < 1024) throw new Error('The downloaded backup was unexpectedly small. Check the backup link.');
   await fsp.writeFile(target, data);
+}
+function cacheName(value) { return crypto.createHash('sha256').update(value).digest('hex').slice(0, 24); }
+async function cachedDownload(url, category, identity) {
+  const directory = path.join(app.getPath('userData'), 'cache', category);
+  await fsp.mkdir(directory, { recursive: true });
+  const extension = category === 'releases' ? '.zip' : '.bin';
+  const target = path.join(directory, `${cacheName(identity)}${extension}`);
+  const markerPath = `${target}.json`;
+  let remoteMarker = url;
+  try {
+    const head = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': 'TreeFrogUI-Installer' }, redirect: 'follow' });
+    remoteMarker = head.headers.get('etag') || head.headers.get('last-modified') || url;
+  } catch { /* a cached file can still be used offline */ }
+  try {
+    const marker = JSON.parse(await fsp.readFile(markerPath, 'utf8'));
+    await fsp.access(target);
+    if (marker.url === url && marker.remoteMarker === remoteMarker) return { path: target, cached: true };
+  } catch { /* cache miss */ }
+  const temporary = `${target}.part`;
+  await download(url, temporary);
+  await fsp.rename(temporary, target);
+  await fsp.writeFile(markerPath, JSON.stringify({ url, remoteMarker, identity }));
+  if (category === 'releases') {
+    for (const file of await fsp.readdir(directory)) {
+      if (file.endsWith('.zip') && path.join(directory, file) !== target) await fsp.rm(path.join(directory, file), { force: true });
+      if (file.endsWith('.zip.json') && path.join(directory, file) !== markerPath) await fsp.rm(path.join(directory, file), { force: true });
+    }
+  }
+  return { path: target, cached: false };
 }
 async function command(program, args, options = {}) {
   return execFileAsync(program, args, { maxBuffer: 16 * 1024 * 1024, ...options });
@@ -157,14 +187,16 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
   cancelled = false;
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'treefrog-installer-'));
   try {
-    progress('Downloading the stock backup…', 8);
-    const stockArchive = path.join(work, 'stock-backup');
-    await download(device.stock, stockArchive);
+    progress('Checking cached stock backup…', 8);
+    const stock = await cachedDownload(device.stock, 'stock', deviceId);
+    const stockArchive = stock.path;
+    progress(stock.cached ? 'Using cached stock backup.' : 'Downloading the stock backup…', 12);
     if (cancelled) throw new Error('Installation cancelled.');
-    progress('Downloading the latest TreeFrogUI release…', 22);
+    progress('Checking for a newer TreeFrogUI release…', 22);
     const release = await latestRelease(preRelease === true);
-    const treefrogArchive = path.join(work, release.name);
-    await download(release.url, treefrogArchive);
+    const releaseCache = await cachedDownload(release.url, 'releases', release.name);
+    const treefrogArchive = releaseCache.path;
+    progress(releaseCache.cached ? `Using cached ${release.tag} release.` : `Downloaded ${release.tag} release.`, 28);
     progress('Formatting the SD card (FAT32)…', 38);
     const mount = await formatCard(source, device.labelName);
     progress('Restoring the clean stock backup…', 58);
