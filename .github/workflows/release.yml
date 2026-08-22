@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to package (leave empty to build the current branch)
+        required: false
+        type: string
+      prerelease:
+        description: Mark a tag release as a prerelease
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: installer-release
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Electron / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux
+          - runner: windows-latest
+            platform: windows
+          - runner: macos-latest
+            platform: macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Stamp release version
+        if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: npm version "${RELEASE_TAG#v}" --no-git-tag-version --allow-same-version
+      - name: Package Electron app
+        run: npm run make
+      - name: Prepare archive
+        id: archive
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name || 'main' }}
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+          RELEASE_ARCH: ${{ runner.arch }}
+        run: |
+          archive="$(find out/make/zip -type f -name '*.zip' -print -quit)"
+          [[ -n "$archive" ]] || { echo 'Electron Forge produced no ZIP.' >&2; exit 1; }
+          asset="TreeFrogUI-Installer-${RELEASE_TAG}-${RELEASE_PLATFORM}-${RELEASE_ARCH}.zip"
+          mv "$archive" "$asset"
+          echo "path=$asset" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TreeFrogUI-Installer-${{ matrix.platform }}
+          path: ${{ steps.archive.outputs.path }}
+      - name: Attach archive to GitHub release
+        if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          PRERELEASE: ${{ inputs.prerelease || 'false' }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "TreeFrogUI Installer $RELEASE_TAG" --notes "Electron installer build for TreeFrogUI." $([[ "$PRERELEASE" == true ]] && echo --prerelease)
+          gh release upload "$RELEASE_TAG" "${{ steps.archive.outputs.path }}" --repo "$GITHUB_REPOSITORY" --clobber
