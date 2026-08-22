@@ -21,3 +21,11 @@ npm start
 ```
 
 Package distributables with `npm run package` or `npm run make`.
+
+## Automated builds
+
+GitHub Actions runs syntax checks on every push. Pushing a tag such as `v0.1.0`
+builds Linux, Windows, and macOS Electron ZIPs and attaches them to a GitHub
+release. You can also open **Actions → release → Run workflow** and leave the
+tag empty for build-only artifacts, or enter an existing tag to rebuild its
+release assets.
