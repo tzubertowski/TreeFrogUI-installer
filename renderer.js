@@ -3,7 +3,7 @@ const steps = ['step-1', 'step-2', 'step-3', 'step-progress', 'step-4'];
 let devices = {}; let inspection = null; let busy = false;
 function showStep(id) { for (const step of steps) $(step).classList.toggle('hidden', step !== id); const active = steps.indexOf(id) + 1; document.querySelectorAll('[data-step-dot]').forEach((dot) => dot.classList.toggle('active', Number(dot.dataset.stepDot) === Math.min(active, 4))); }
 function error(message) { $('error').textContent = message || ''; $('error').classList.toggle('hidden', !message); }
-function refresh() { $('start').disabled = busy || !$('confirm').checked; }
+function refresh() { $('start').disabled = busy || !inspection?.formatSupported; }
 async function boot() {
   devices = await window.treefrogInstaller.devices();
   for (const [id, value] of Object.entries(devices)) { const option = document.createElement('option'); option.value = id; option.textContent = value.label; $('device').append(option); }
@@ -18,10 +18,9 @@ async function boot() {
     if (inspection.formatSupported) { $('card-summary').innerHTML = `<strong>Card to erase</strong><br>Path: <code>${inspection.card}</code><br>Device: <code>${inspection.source}</code><br>Details: ${inspection.details || 'not reported'}<br>Platform: ${inspection.platform}`; showStep('step-3'); }
     else error('This card could not be identified for safe formatting.');
   };
-  $('confirm').onchange = refresh;
   $('start').onclick = async () => {
-    if (!inspection?.formatSupported || !$('confirm').checked) return;
-    if (!window.confirm(`ERASE ${inspection.source}\n\nThis permanently formats the selected SD card as FAT32. Continue?`)) return;
+    if (!inspection?.formatSupported) return;
+    if (!window.confirm(`WARNING: stock SD cards are often low quality and fail. Use a fresh quality card if possible.\n\nIf you are reusing the stock card, back up its files first.\n\nERASE ${inspection.source}\nThis permanently formats the selected SD card as FAT32. Continue?`)) return;
     busy = true; showStep('step-progress'); error('');
     try {
       const result = await window.treefrogInstaller.start({ deviceId: $('device').value, card: $('card').value, source: inspection.source, confirmed: true, preRelease: $('release-channel').value === 'prerelease' });
