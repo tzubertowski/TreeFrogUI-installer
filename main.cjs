@@ -62,8 +62,21 @@ async function extractArchive(archive, destination) {
     throw new Error('7-Zip is required to extract this backup. Install p7zip/7z and try again.');
   }
 }
-async function copyTree(source, destination) {
-  await command('cp', ['-a', `${source}/.`, destination]);
+async function copyTree(source, destination, onFile) {
+  await new Promise((resolve, reject) => {
+    const child = spawn('cp', ['-a', '-v', `${source}/.`, destination], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let buffer = '';
+    let error = '';
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) if (line.trim()) onFile?.(line.trim().replace(/^.* -> /, ''));
+    });
+    child.stderr.on('data', (chunk) => { error += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(error.trim() || `Copy failed (${code})`)));
+  });
 }
 async function archiveRoot(directory) {
   const entries = await fsp.readdir(directory, { withFileTypes: true });
@@ -109,14 +122,16 @@ async function install({ deviceId, card, source, confirmed }) {
     progress('Restoring the clean stock backup…', 58);
     const stockDir = path.join(work, 'stock'); await fsp.mkdir(stockDir); await extractArchive(stockArchive, stockDir);
     const stockRoot = await archiveRoot(stockDir); if (!stockRoot) throw new Error('The stock backup does not contain a cubegm/ directory.');
-    await copyTree(stockRoot, mount);
+    let stockFiles = 0;
+    await copyTree(stockRoot, mount, (file) => { stockFiles += 1; progress(`Restoring stock backup… ${path.basename(file)}`, Math.min(72, 58 + stockFiles / 20)); });
     progress(`Installing TreeFrogUI ${release.tag}…`, 76);
     const tfDir = path.join(work, 'treefrog'); await fsp.mkdir(tfDir); await extractArchive(treefrogArchive, tfDir);
     const releaseRoot = await archiveRoot(tfDir); if (!releaseRoot) throw new Error('The TreeFrogUI archive has no release/ payload.');
-    await copyTree(releaseRoot, mount);
+    let releaseFiles = 0;
+    await copyTree(releaseRoot, mount, (file) => { releaseFiles += 1; progress(`Installing TreeFrogUI… ${path.basename(file)}`, Math.min(90, 76 + releaseFiles / 20)); });
     const deviceOverlay = path.join(releaseRoot, 'install_first', device.install);
     if (!fs.existsSync(deviceOverlay)) throw new Error(`The TreeFrogUI release has no ${device.install} device overlay.`);
-    await copyTree(deviceOverlay, mount);
+    await copyTree(deviceOverlay, mount, (file) => progress(`Applying ${device.label} boot files… ${path.basename(file)}`, 94));
     progress('Finished — enjoy TreeFrogUI!', 100);
     return { release: release.tag, mount, device: device.label };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
