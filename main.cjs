@@ -43,13 +43,15 @@ async function cachedDownload(url, category, identity) {
   const markerPath = `${target}.json`;
   let remoteMarker = url;
   try {
-    const head = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': 'TreeFrogUI-Installer' }, redirect: 'follow' });
+    const head = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': 'TreeFrogUI-Installer' }, redirect: 'follow', signal: AbortSignal.timeout(3000) });
     remoteMarker = head.headers.get('etag') || head.headers.get('last-modified') || url;
   } catch { /* a cached file can still be used offline */ }
   try {
     const marker = JSON.parse(await fsp.readFile(markerPath, 'utf8'));
     await fsp.access(target);
-    if (marker.url === url && marker.remoteMarker === remoteMarker) return { path: target, cached: true };
+    // If the metadata probe timed out, prefer the existing archive rather than
+    // making the user wait for a second full download.
+    if (marker.url === url && (marker.remoteMarker === remoteMarker || remoteMarker === url)) return { path: target, cached: true };
   } catch { /* cache miss */ }
   const temporary = `${target}.part`;
   await download(url, temporary);
