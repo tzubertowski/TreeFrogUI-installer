@@ -41,20 +41,39 @@ async function chooseCard() {
   return result.canceled ? null : result.filePaths[0];
 }
 async function inspectCard(card) {
-  if (process.platform !== 'linux') return { card, source: null, platform: process.platform, formatSupported: false };
   try {
-    const { stdout } = await command('findmnt', ['-no', 'SOURCE', '-T', card]);
-    const source = stdout.trim();
-    return { card, source, platform: process.platform, formatSupported: /^\/dev\//.test(source) };
-  } catch { return { card, source: null, platform: process.platform, formatSupported: false }; }
+    if (process.platform === 'linux') {
+      const { stdout } = await command('findmnt', ['-no', 'SOURCE', '-T', card]);
+      const source = stdout.trim();
+      const details = await command('lsblk', ['-no', 'SIZE,MODEL,FSTYPE,LABEL', source]);
+      return { card, source, platform: process.platform, details: details.stdout.trim(), formatSupported: /^\/dev\//.test(source) };
+    }
+    if (process.platform === 'darwin') {
+      const { stdout } = await command('df', ['-P', card]);
+      const source = stdout.trim().split(/\s+/)[0];
+      const details = await command('diskutil', ['info', source]);
+      return { card, source, platform: process.platform, details: details.stdout.trim(), formatSupported: source.startsWith('/dev/') };
+    }
+    if (process.platform === 'win32') {
+      const root = path.parse(card).root;
+      const drive = root.replace(/[:\\/]/g, '');
+      const { stdout } = await command('powershell.exe', ['-NoProfile', '-Command', `Get-Volume -DriveLetter ${drive} | ConvertTo-Json -Compress`]);
+      const volume = JSON.parse(stdout);
+      return { card, source: root, platform: process.platform, details: `${volume.FileSystemLabel || ''} · ${volume.FileSystem || 'unknown'} · ${volume.Size ? Math.round(volume.Size / 1e9) + ' GB' : 'size unknown'}`, formatSupported: Boolean(root) };
+    }
+  } catch { /* fall through to the unsupported-card message */ }
+  return { card, source: null, platform: process.platform, details: '', formatSupported: false };
 }
-async function latestRelease() {
-  const response = await fetch('https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest', { headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' } });
+async function latestRelease(preRelease = false) {
+  const endpoint = preRelease ? 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases?per_page=30' : 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest';
+  const response = await fetch(endpoint, { headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' } });
   if (!response.ok) throw new Error(`TreeFrogUI release lookup failed (${response.status})`);
-  const release = await response.json();
+  const releases = await response.json();
+  const release = preRelease ? releases.find((item) => item.prerelease && !item.draft) : releases;
+  if (!release) throw new Error('No TreeFrogUI prerelease is currently available.');
   const asset = release.assets.find((item) => /^TreeFrogUI_.*\.zip$/i.test(item.name));
   if (!asset) throw new Error('The latest TreeFrogUI release has no full installation ZIP.');
-  return { tag: release.tag_name, name: asset.name, url: asset.browser_download_url };
+  return { tag: release.tag_name, name: asset.name, url: asset.browser_download_url, prerelease: Boolean(release.prerelease) };
 }
 async function extractArchive(archive, destination) {
   try { await command('7z', ['x', '-y', archive, `-o${destination}`]); return; } catch (error) {
@@ -64,7 +83,10 @@ async function extractArchive(archive, destination) {
 }
 async function copyTree(source, destination, onFile) {
   await new Promise((resolve, reject) => {
-    const child = spawn('cp', ['-a', '-v', `${source}/.`, destination], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const windows = process.platform === 'win32';
+    const child = windows
+      ? spawn('robocopy', [source, destination, '/E', '/COPY:DAT', '/R:1', '/W:1'], { stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn('cp', ['-a', '-v', `${source}/.`, destination], { stdio: ['ignore', 'pipe', 'pipe'] });
     let buffer = '';
     let error = '';
     child.stdout.on('data', (chunk) => {
@@ -75,7 +97,7 @@ async function copyTree(source, destination, onFile) {
     });
     child.stderr.on('data', (chunk) => { error += chunk.toString(); });
     child.on('error', reject);
-    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(error.trim() || `Copy failed (${code})`)));
+    child.on('close', (code) => (windows ? code <= 7 : code === 0) ? resolve() : reject(new Error(error.trim() || `Copy failed (${code})`)));
   });
 }
 async function archiveRoot(directory) {
@@ -88,6 +110,16 @@ async function archiveRoot(directory) {
   return null;
 }
 async function formatCard(source, label) {
+  if (process.platform === 'darwin') {
+    await command('diskutil', ['unmount', source]);
+    await command('diskutil', ['eraseVolume', 'MS-DOS', label, source]);
+    return source;
+  }
+  if (process.platform === 'win32') {
+    const drive = source.replace(/[:\\/]/g, '');
+    await command('powershell.exe', ['-NoProfile', '-Command', `Format-Volume -DriveLetter ${drive} -FileSystem FAT32 -NewFileSystemLabel '${label}' -Confirm:$false`]);
+    return source;
+  }
   // Explicit confirmation happens in the renderer before this IPC call.
   // udisksctl uses the desktop's polkit agent and does not require a root
   // umount. This avoids pkexec's non-interactive authorization failure.
@@ -107,7 +139,17 @@ async function formatCard(source, label) {
   } catch { /* report the useful installer error below */ }
   throw new Error(`The card was formatted, but could not be mounted again. ${output.trim()}`);
 }
-async function install({ deviceId, card, source, confirmed }) {
+async function ejectCard(source) {
+  try {
+    if (process.platform === 'linux') await command('udisksctl', ['unmount', '-b', source]);
+    else if (process.platform === 'darwin') await command('diskutil', ['eject', source]);
+    else if (process.platform === 'win32') {
+      const drive = source.replace(/[:\\/]/g, '');
+      await command('powershell.exe', ['-NoProfile', '-Command', `Dismount-Volume -DriveLetter ${drive} -Force`]);
+    }
+  } catch (error) { progress('Installation complete — eject the SD card safely.', 99); }
+}
+async function install({ deviceId, card, source, confirmed, preRelease }) {
   if (!confirmed) throw new Error('Formatting was not confirmed.');
   const device = devices[deviceId];
   if (!device) throw new Error('Unknown device.');
@@ -120,7 +162,7 @@ async function install({ deviceId, card, source, confirmed }) {
     await download(device.stock, stockArchive);
     if (cancelled) throw new Error('Installation cancelled.');
     progress('Downloading the latest TreeFrogUI release…', 22);
-    const release = await latestRelease();
+    const release = await latestRelease(preRelease === true);
     const treefrogArchive = path.join(work, release.name);
     await download(release.url, treefrogArchive);
     progress('Formatting the SD card (FAT32)…', 38);
@@ -138,8 +180,10 @@ async function install({ deviceId, card, source, confirmed }) {
     const deviceOverlay = path.join(releaseRoot, 'install_first', device.install);
     if (!fs.existsSync(deviceOverlay)) throw new Error(`The TreeFrogUI release has no ${device.install} device overlay.`);
     await copyTree(deviceOverlay, mount, (file) => progress(`Applying ${device.label} boot files… ${path.basename(file)}`, 94));
+    progress('Ejecting the SD card…', 97);
+    await ejectCard(source);
     progress('Finished — enjoy TreeFrogUI!', 100);
-    return { release: release.tag, mount, device: device.label };
+    return { release: release.tag, mount, device: device.label, prerelease: release.prerelease };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
 
@@ -148,7 +192,7 @@ app.whenReady().then(() => {
   ipcMain.handle('devices:list', () => devices);
   ipcMain.handle('card:choose', chooseCard);
   ipcMain.handle('card:inspect', (_event, card) => inspectCard(card));
-  ipcMain.handle('release:latest', latestRelease);
+  ipcMain.handle('release:latest', (_event, preRelease) => latestRelease(preRelease === true));
   ipcMain.handle('install:start', (_event, input) => install(input));
   ipcMain.handle('install:cancel', () => { cancelled = true; });
   ipcMain.handle('stock:open', (_event, id) => shell.openExternal(devices[id]?.stockPage || devices[id]?.stock || 'https://github.com/tzubertowski/treefrog-ui/blob/main/install.md'));
