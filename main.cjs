@@ -89,7 +89,13 @@ async function archiveRoot(directory) {
 }
 async function formatCard(source, label) {
   // Explicit confirmation happens in the renderer before this IPC call.
-  await command('pkexec', ['umount', source]);
+  // udisksctl uses the desktop's polkit agent and does not require a root
+  // umount. This avoids pkexec's non-interactive authorization failure.
+  try {
+    await command('udisksctl', ['unmount', '-b', source]);
+  } catch {
+    await command('pkexec', ['umount', source]);
+  }
   await command('pkexec', ['mkfs.vfat', '-F', '32', '-n', label, source]);
   const { stdout, stderr } = await command('udisksctl', ['mount', '-b', source]);
   const output = `${stdout}\n${stderr}`;
