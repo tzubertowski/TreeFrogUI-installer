@@ -1,0 +1,18 @@
+{
+  "name": "treefrogui-installer",
+  "productName": "TreeFrogUI Installer",
+  "version": "0.1.0",
+  "description": "Clean-install TreeFrogUI onto supported handheld SD cards.",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "electron": "^43.4.1"
+  }
+}

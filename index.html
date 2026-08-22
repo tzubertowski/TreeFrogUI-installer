@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TreeFrogUI Installer</title><link rel="stylesheet" href="styles.css"></head>
+<body><main>
+  <header><div class="frog">🐸</div><div><h1>TreeFrogUI Installer</h1><p>Clean install the friendly frontend onto your handheld SD card.</p></div></header>
+  <section class="card"><div class="step"><span>1</span><div><h2>Choose your device</h2><p>R36SX owners: choose the version printed by your stock firmware. Both variants are shown separately.</p></div></div><select id="device"></select><button id="stock" class="link">Open stock-backup page</button></section>
+  <section class="card"><div class="step"><span>2</span><div><h2>Select the SD card</h2><p>Choose the mounted card root. The installer will identify its device before formatting.</p></div></div><div class="row"><input id="card" readonly placeholder="No SD card selected"><button id="choose">Choose SD card</button></div><p id="card-info" class="muted"></p></section>
+  <section class="card warning"><div class="step"><span>3</span><div><h2>Install cleanly</h2><p>This formats the selected card as FAT32, restores the matching stock backup, then overlays TreeFrogUI.</p></div></div><label class="confirm"><input type="checkbox" id="confirm"> I understand that everything on this SD card will be erased.</label><button id="start" class="primary" disabled>Format and install TreeFrogUI</button></section>
+  <section id="progress-card" class="card hidden"><h2 id="progress-title">Preparing…</h2><div class="bar"><div id="progress"></div></div><p id="progress-message" class="muted"></p></section>
+  <section id="done" class="card done hidden"><h2>All done — enjoy TreeFrogUI! 🐸</h2><p id="done-message"></p><p>If you want box art, screenshots or title screens, try <a href="https://github.com/tzubertowski/mini-scraper-cfw/releases" id="scraper">Scraper Mini for TreeFrogUI</a>.</p></section>
+  <p id="error" class="error hidden"></p>
+</main><script src="renderer.js"></script></body></html>
