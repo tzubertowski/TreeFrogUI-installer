@@ -8,13 +8,23 @@ async function boot() {
   devices = await window.treefrogInstaller.devices();
   for (const [id, value] of Object.entries(devices)) { const option = document.createElement('option'); option.value = id; option.textContent = value.label; $('device').append(option); }
   $('stock').onclick = () => window.treefrogInstaller.openStock($('device').value);
+  async function updateReleasePreview() {
+    const preRelease = $('release-channel').value === 'prerelease';
+    $('release-preview').textContent = 'Checking available releases…';
+    try {
+      const release = await window.treefrogInstaller.latestRelease(preRelease);
+      $('release-preview').innerHTML = `<strong>${release.tag}</strong> · ${release.prerelease ? 'Pre-release / testing' : 'Stable'}<br><span class="text-secondary">This is the TreeFrogUI ZIP that will be installed.</span>`;
+    } catch (cause) { $('release-preview').textContent = cause.message || String(cause); }
+  }
+  $('release-channel').onchange = updateReleasePreview;
+  updateReleasePreview();
   $('next-device').onclick = () => showStep('step-2');
   $('back-card').onclick = () => showStep('step-1');
   $('back-install').onclick = () => showStep('step-2');
   $('choose').onclick = async () => {
     const selected = await window.treefrogInstaller.chooseCard(); if (!selected) return;
     $('card').value = selected; inspection = await window.treefrogInstaller.inspectCard(selected);
-    $('card-info').textContent = inspection.source ? `${inspection.source} · ${inspection.details || inspection.platform}` : 'Could not identify this card. FAT32 formatting is unavailable for it.';
+    $('card-info').textContent = inspection.source ? `${inspection.source} · ${inspection.details || inspection.platform}` : (inspection.hint || 'Could not identify this card. FAT32 formatting is unavailable for it.');
     if (inspection.formatSupported) { $('card-summary').innerHTML = `<strong>Card to erase</strong><br>Path: <code>${inspection.card}</code><br>Device: <code>${inspection.source}</code><br>Details: ${inspection.details || 'not reported'}<br>Platform: ${inspection.platform}`; showStep('step-3'); }
     else error('This card could not be identified for safe formatting.');
   };
@@ -24,7 +34,7 @@ async function boot() {
     busy = true; showStep('step-progress'); error('');
     try {
       const result = await window.treefrogInstaller.start({ deviceId: $('device').value, card: $('card').value, source: inspection.source, confirmed: true, preRelease: $('release-channel').value === 'prerelease' });
-      $('done-message').textContent = `${result.device} is ready. The SD card was ejected safely after installing ${result.release}.`;
+      $('done-message').textContent = `${result.device} is ready. ${result.ejected ? 'The SD card was ejected safely.' : 'Please eject the SD card manually.'} Installed ${result.release}.`;
       showStep('step-4');
     } catch (cause) { busy = false; showStep('step-3'); error(cause.message || String(cause)); refresh(); }
   };

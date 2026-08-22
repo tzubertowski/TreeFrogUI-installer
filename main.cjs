@@ -94,7 +94,12 @@ async function inspectCard(card) {
       return { card, source: root, platform: process.platform, details: `${volume.FileSystemLabel || ''} · ${volume.FileSystem || 'unknown'} · ${volume.Size ? Math.round(volume.Size / 1e9) + ' GB' : 'size unknown'}`, formatSupported: Boolean(root) };
     }
   } catch { /* fall through to the unsupported-card message */ }
-  return { card, source: null, platform: process.platform, details: '', formatSupported: false };
+  const hint = process.platform === 'win32'
+    ? 'Windows could not identify this drive. Select the SD card drive root, not a subfolder.'
+    : process.platform === 'darwin'
+      ? 'macOS could not identify this volume. Select the mounted SD card volume.'
+      : 'Linux could not identify a mounted removable volume.';
+  return { card, source: null, platform: process.platform, details: '', hint, formatSupported: false };
 }
 async function latestRelease(preRelease = false) {
   const endpoint = preRelease ? 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases?per_page=30' : 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest';
@@ -179,7 +184,8 @@ async function ejectCard(source) {
       const drive = source.replace(/[:\\/]/g, '');
       await command('powershell.exe', ['-NoProfile', '-Command', `Dismount-Volume -DriveLetter ${drive} -Force`]);
     }
-  } catch (error) { progress('Installation complete — eject the SD card safely.', 99); }
+    return true;
+  } catch (error) { progress('Installation complete — eject the SD card manually.', 99); return false; }
 }
 async function install({ deviceId, card, source, confirmed, preRelease }) {
   if (!confirmed) throw new Error('Formatting was not confirmed.');
@@ -200,7 +206,15 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     const treefrogArchive = releaseCache.path;
     progress(releaseCache.cached ? `Using cached ${release.tag} release.` : `Downloaded ${release.tag} release.`, 28);
     progress('Formatting the SD card (FAT32)…', 38);
-    const mount = await formatCard(source, device.labelName);
+    let mount;
+    try { mount = await formatCard(source, device.labelName); } catch (error) {
+      const platformHint = process.platform === 'win32'
+        ? 'Windows needs administrator permission to format the drive. Restart the installer as Administrator and try again.'
+        : process.platform === 'darwin'
+          ? 'macOS needs authorization to erase the volume. Approve the system prompt and try again.'
+          : 'Linux needs administrator authorization to format the card. Approve the polkit prompt and try again.';
+      throw new Error(`${platformHint}\n${error instanceof Error ? error.message : String(error)}`);
+    }
     progress('Restoring the clean stock backup…', 58);
     const stockDir = path.join(work, 'stock'); await fsp.mkdir(stockDir); await extractArchive(stockArchive, stockDir);
     const stockRoot = await archiveRoot(stockDir); if (!stockRoot) throw new Error('The stock backup does not contain a cubegm/ directory.');
@@ -215,9 +229,9 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     if (!fs.existsSync(deviceOverlay)) throw new Error(`The TreeFrogUI release has no ${device.install} device overlay.`);
     await copyTree(deviceOverlay, mount, (file) => progress(`Applying ${device.label} boot files… ${path.basename(file)}`, 94));
     progress('Ejecting the SD card…', 97);
-    await ejectCard(source);
+    const ejected = await ejectCard(source);
     progress('Finished — enjoy TreeFrogUI!', 100);
-    return { release: release.tag, mount, device: device.label, prerelease: release.prerelease };
+    return { release: release.tag, mount, device: device.label, prerelease: release.prerelease, ejected };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
 
