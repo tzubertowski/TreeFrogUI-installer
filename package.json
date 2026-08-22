@@ -20,5 +20,8 @@
   },
   "allowScripts": {
     "electron@36.9.5": true
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.8"
   }
 }
