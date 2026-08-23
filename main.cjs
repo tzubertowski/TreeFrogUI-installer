@@ -28,7 +28,7 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 async function download(url, target) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'TreeFrogUI-Installer' }, redirect: 'follow' });
+  const response = await fetch(url, { headers: { 'User-Agent': 'TreeFrogUI-Installer' }, redirect: 'follow', signal: AbortSignal.timeout(120000) });
   if (!response.ok) throw new Error(`Download failed (${response.status})`);
   const data = Buffer.from(await response.arrayBuffer());
   if (data.length < 1024) throw new Error('The downloaded backup was unexpectedly small. Check the backup link.');
@@ -103,7 +103,7 @@ async function inspectCard(card) {
 }
 async function latestRelease(preRelease = false) {
   const endpoint = preRelease ? 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases?per_page=30' : 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest';
-  const response = await fetch(endpoint, { headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' } });
+  const response = await fetch(endpoint, { headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`TreeFrogUI release lookup failed (${response.status})`);
   const releases = await response.json();
   const release = preRelease ? releases.find((item) => item.prerelease && !item.draft) : releases;
@@ -229,11 +229,12 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     const stockArchive = stock.path;
     progress(stock.cached ? 'Using cached stock backup.' : 'Downloading the stock backup…', 12);
     if (cancelled) throw new Error('Installation cancelled.');
-    progress('Checking for a newer TreeFrogUI release…', 22);
+    progress('Checking GitHub for the selected TreeFrogUI channel…', 22);
     const release = await latestRelease(preRelease === true);
+    progress(`Downloading TreeFrogUI ${release.tag}…`, 25);
     const releaseCache = await cachedDownload(release.url, 'releases', release.name);
     const treefrogArchive = releaseCache.path;
-    progress(releaseCache.cached ? `Using cached ${release.tag} release.` : `Downloaded ${release.tag} release.`, 28);
+    progress(releaseCache.cached ? `Using cached ${release.tag} release.` : `Downloaded ${release.tag} release.`, 30);
     progress('Formatting the SD card (FAT32)…', 38);
     let mount;
     try { mount = await formatCard(source, device.labelName); } catch (error) {
