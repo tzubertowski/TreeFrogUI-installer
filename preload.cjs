@@ -4,7 +4,9 @@ contextBridge.exposeInMainWorld('treefrogInstaller', {
   chooseCard: () => ipcRenderer.invoke('card:choose'),
   inspectCard: (card) => ipcRenderer.invoke('card:inspect', card),
   latestRelease: (preRelease) => ipcRenderer.invoke('release:latest', preRelease),
+  checkUpdate: (input) => ipcRenderer.invoke('update:check', input),
   start: (input) => ipcRenderer.invoke('install:start', input),
+  update: (input) => ipcRenderer.invoke('update:start', input),
   cancel: () => ipcRenderer.invoke('install:cancel'),
   openStock: (id) => ipcRenderer.invoke('stock:open', id),
   onProgress: (listener) => { const handler = (_event, value) => listener(value); ipcRenderer.on('install:progress', handler); return () => ipcRenderer.removeListener('install:progress', handler); }

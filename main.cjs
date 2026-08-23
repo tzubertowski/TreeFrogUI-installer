@@ -110,7 +110,36 @@ async function latestRelease(preRelease = false) {
   if (!release) throw new Error('No TreeFrogUI prerelease is currently available.');
   const asset = release.assets.find((item) => /^TreeFrogUI_.*\.zip$/i.test(item.name));
   if (!asset) throw new Error('The latest TreeFrogUI release has no full installation ZIP.');
-  return { tag: release.tag_name, name: asset.name, url: asset.browser_download_url, prerelease: Boolean(release.prerelease) };
+  const update = release.assets.find((item) => /^update\.zip$/i.test(item.name));
+  return { tag: release.tag_name, name: asset.name, url: asset.browser_download_url,
+    updateName: update?.name || null, updateUrl: update?.browser_download_url || null,
+    prerelease: Boolean(release.prerelease) };
+}
+function versionParts(value) {
+  const match = String(value || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[_-]?([a-z0-9]+))?$/i);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]), suffix: (match[4] || '').toLowerCase() };
+}
+function compareVersions(left, right) {
+  const a = versionParts(left), b = versionParts(right);
+  if (!a || !b) return null;
+  for (const key of ['major', 'minor', 'patch']) if (a[key] !== b[key]) return a[key] - b[key];
+  if (!a.suffix && b.suffix) return 1;
+  if (a.suffix && !b.suffix) return -1;
+  return a.suffix.localeCompare(b.suffix, undefined, { numeric: true });
+}
+async function cardVersion(card) {
+  try { return (await fsp.readFile(path.join(card, 'cubegm', 'version.txt'), 'utf8')).trim(); }
+  catch { return null; }
+}
+async function checkUpdate({ card, preRelease }) {
+  const current = await cardVersion(card);
+  if (!current) return { legacy: true, available: false, current: null };
+  const release = await latestRelease(preRelease === true);
+  const comparison = compareVersions(release.tag, current);
+  if (comparison === null) return { legacy: true, available: false, current };
+  return { legacy: false, available: comparison > 0, current, release,
+    reason: comparison > 0 ? '' : 'Your card is already running this release or a newer one.' };
 }
 async function extractArchive(archive, destination) {
   try { await command('7z', ['x', '-y', archive, `-o${destination}`]); return; } catch (error) {
@@ -234,6 +263,48 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     return { release: release.tag, mount, device: device.label, prerelease: release.prerelease, ejected };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
+async function update({ deviceId, card, source, preRelease }) {
+  const status = await checkUpdate({ card, preRelease });
+  if (status.legacy) throw new Error('This card is running a build without a version marker. Please install the latest TreeFrogUI release first.');
+  if (!status.available) return { updated: false, current: status.current, release: status.release?.tag || null, reason: status.reason };
+  if (!status.release.updateUrl) throw new Error(`TreeFrogUI ${status.release.tag} does not provide an update archive yet. Install the full release instead.`);
+  cancelled = false;
+  const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'treefrog-update-'));
+  try {
+    progress(`Downloading TreeFrogUI ${status.release.tag} update…`, 12);
+    const archive = await cachedDownload(status.release.updateUrl, 'releases', `${status.release.tag}-${status.release.updateName}`);
+    progress('Downloaded update archive.', 25);
+    const unpacked = path.join(work, 'update'); await fsp.mkdir(unpacked); await extractArchive(archive.path, unpacked);
+    const root = path.join(unpacked, 'treefrog-update');
+    if (!fs.existsSync(root)) throw new Error('The update archive has an invalid layout.');
+    if (!root || path.basename(root) !== 'treefrog-update') throw new Error('The update archive has an invalid layout.');
+    const manifest = await fsp.readFile(path.join(root, 'manifest.txt'), 'utf8').catch(() => '');
+    if (!new RegExp(`(?:^|\\n)version=${status.release.tag.replace(/^v/i, '')}(?:\\n|$)`).test(manifest)) throw new Error('The update archive version does not match the selected release.');
+    const payload = path.join(root, 'payload');
+    let files = 0;
+    if (fs.existsSync(payload)) await copyTree(payload, card, (file) => { files += 1; progress(`Updating TreeFrogUI… ${path.basename(file)}`, Math.min(78, 28 + files / 3)); });
+    const deletes = async (file) => {
+      if (!fs.existsSync(file)) return;
+      for (const relative of (await fsp.readFile(file, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+        if (relative.includes('..') || path.isAbsolute(relative)) continue;
+        await fsp.rm(path.join(card, relative), { recursive: true, force: true });
+      }
+    };
+    await deletes(path.join(root, 'delete.txt'));
+    const device = devices[deviceId];
+    if (!device) throw new Error('Choose your device before updating.');
+    const deviceRoot = path.join(root, 'device', device.install);
+    if (fs.existsSync(deviceRoot)) {
+      const devicePayload = path.join(deviceRoot, 'cubegm');
+      if (fs.existsSync(devicePayload)) await copyTree(devicePayload, path.join(card, 'cubegm'), (file) => progress(`Applying ${device.label} update… ${path.basename(file)}`, 84));
+      await deletes(path.join(deviceRoot, 'delete.txt'));
+    }
+    progress('Ejecting the SD card…', 96);
+    const ejected = await ejectCard(source);
+    progress('Update complete.', 100);
+    return { updated: true, current: status.current, release: status.release.tag, ejected };
+  } finally { await fsp.rm(work, { recursive: true, force: true }); }
+}
 
 app.whenReady().then(() => {
   createWindow();
@@ -241,7 +312,9 @@ app.whenReady().then(() => {
   ipcMain.handle('card:choose', chooseCard);
   ipcMain.handle('card:inspect', (_event, card) => inspectCard(card));
   ipcMain.handle('release:latest', (_event, preRelease) => latestRelease(preRelease === true));
+  ipcMain.handle('update:check', (_event, input) => checkUpdate(input));
   ipcMain.handle('install:start', (_event, input) => install(input));
+  ipcMain.handle('update:start', (_event, input) => update(input));
   ipcMain.handle('install:cancel', () => { cancelled = true; });
   ipcMain.handle('stock:open', (_event, id) => shell.openExternal(devices[id]?.stockPage || devices[id]?.stock || 'https://github.com/tzubertowski/treefrog-ui/blob/main/install.md'));
 });
