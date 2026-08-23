@@ -1,7 +1,7 @@
 {
   "name": "treefrogui-installer",
   "productName": "TreeFrogUI Installer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Clean-install TreeFrogUI onto supported handheld SD cards.",
   "main": "main.cjs",
   "private": true,
