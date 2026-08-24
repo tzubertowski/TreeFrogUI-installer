@@ -6,7 +6,9 @@
   "main": "main.cjs",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/ensure-tools.cjs",
     "start": "electron .",
+    "test": "node test/package.test.cjs && node --check main.cjs && node --check preload.cjs && node --check renderer.js",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
@@ -22,6 +24,7 @@
     "electron@36.9.5": true
   },
   "dependencies": {
+    "7zip-bin": "^5.2.0",
     "bootstrap": "^5.3.8"
   }
 }

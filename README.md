@@ -9,7 +9,7 @@ The guided flow:
 3. Confirm the destructive FAT32 format.
 4. Download and restore the matching stock backup, then overlay the latest TreeFrogUI release and device boot overlay.
 
-Formatting is currently supported on Linux through `pkexec`, `mkfs.vfat`, and `udisksctl`. The app always shows the exact block device and asks for confirmation immediately before erasing it.
+Formatting is supported on Linux through `pkexec`, `mkfs.vfat`, and `udisksctl`, and on Windows through the built-in Storage PowerShell module. Windows fresh installs must be run as Administrator. The app only accepts removable USB/SD volumes on Windows, always shows the exact device, and asks for confirmation immediately before erasing it. Archive extraction uses a bundled 7-Zip executable; users do not need to install it separately.
 
 After installation, the app links to [Scraper Mini for TreeFrogUI](https://github.com/tzubertowski/mini-scraper-cfw/releases) for box art, screenshots, and title screens.
 
