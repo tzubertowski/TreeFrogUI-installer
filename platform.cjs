@@ -1,10 +1,7 @@
-const path = require('node:path');
-
 function windowsDriveRoot(card) {
-  const resolved = path.win32.resolve(String(card || ''));
-  const root = path.win32.parse(resolved).root;
-  if (!/^[A-Za-z]:\\$/.test(root) || resolved.toLowerCase() !== root.toLowerCase()) return null;
-  return root;
+  const selected = String(card || '');
+  if (!/^[A-Za-z]:[\\/]$/.test(selected)) return null;
+  return `${selected[0]}:\\`;
 }
 
 function isSafeWindowsVolume(volume) {
