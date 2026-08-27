@@ -4,7 +4,8 @@ Electron installer for a clean TreeFrogUI SD card setup.
 
 The guided flow:
 
-1. Choose the handheld (R36SX v2.6 and v2.7 are separate choices).
+1. Choose the handheld (R36SX v2.6 and v2.7 are separate choices; R36HD has
+   its own hardware profile).
 2. Select the mounted SD card.
 3. Confirm the destructive FAT32 format.
 4. Download and restore the matching stock backup, then overlay the latest TreeFrogUI release and device boot overlay.
