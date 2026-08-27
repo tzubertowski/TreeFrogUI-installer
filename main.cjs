@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 const devices = {
   r36sx26: { label: 'R36SX · v2.6', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z' },
   r36sx27: { label: 'R36SX · v2.7', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.7_stock.7z' },
-  r36hd: { label: 'R36HD', family: 'R36HD', install: 'r36hd', labelName: 'R36HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36HD_stock.7z?revision=2' },
+  r36hd: { label: 'R36HD', family: 'R36HD', install: 'r36hd', labelName: 'R36HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z' },
   sf3000: { label: 'SF3000', family: 'SF3000', install: 'sf3000', labelName: 'SF3000', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000_stock.7z' },
   sf3000hd: { label: 'SF3000 HD', family: 'SF3500', install: 'sf3000hd', labelName: 'SF3000HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000_HD_stock.7z' },
   sf3100: { label: 'SF3100', family: 'SF3500', install: 'sf3100', labelName: 'SF3100', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3100_stock.7z' },
