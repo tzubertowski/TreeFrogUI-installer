@@ -9,7 +9,7 @@ const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { promisify } = require('node:util');
 const { path7za } = require('7zip-bin');
-const { isSafeWindowsVolume, windowsDriveRoot } = require('./platform.cjs');
+const { isSafeLinuxBlockDevice, isSafeWindowsVolume, windowsDriveRoot } = require('./platform.cjs');
 const execFileAsync = promisify(execFile);
 
 const devices = {
@@ -100,13 +100,29 @@ async function chooseCard() {
 function powershell(script) {
   return command('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference = 'Stop'; ${script}`]);
 }
+async function linuxBlockDevices() {
+  const { stdout } = await command('lsblk', ['-J', '-b', '-o', 'PATH,TYPE,SIZE,MODEL,FSTYPE,LABEL,RM,TRAN,MOUNTPOINTS,PKNAME']);
+  return JSON.parse(stdout).blockdevices || [];
+}
+async function assertSafeLinuxSource(source) {
+  const blockDevices = await linuxBlockDevices();
+  if (!isSafeLinuxBlockDevice(blockDevices, source)) throw new Error('Safety check refused to format a non-removable or system block device.');
+}
 async function inspectCard(card) {
   try {
     if (process.platform === 'linux') {
-      const { stdout } = await command('findmnt', ['-no', 'SOURCE', '-T', card]);
-      const source = stdout.trim();
-      const details = await command('lsblk', ['-no', 'SIZE,MODEL,FSTYPE,LABEL', source]);
-      return { card, source, platform: process.platform, details: details.stdout.trim(), formatSupported: /^\/dev\//.test(source) };
+      const { stdout } = await command('findmnt', ['-J', '-T', card, '-o', 'SOURCE,TARGET']);
+      const mount = JSON.parse(stdout).filesystems?.[0];
+      const source = mount?.source;
+      const selectedRoot = await fsp.realpath(card);
+      const mountRoot = mount?.target ? await fsp.realpath(mount.target) : null;
+      const blockDevices = await linuxBlockDevices();
+      const device = blockDevices.find((item) => item.path === source);
+      const safe = selectedRoot === mountRoot && isSafeLinuxBlockDevice(blockDevices, source);
+      const size = device?.size ? `${(device.size / 1e9).toFixed(1)} GB` : 'size unknown';
+      const details = [device?.label, device?.fstype, size, device?.model].filter(Boolean).join(' · ');
+      return { card: mountRoot || card, source, platform: process.platform, details, formatSupported: safe,
+        removable: safe, hint: safe ? '' : 'Select the root of a mounted removable USB/SD card. Internal and system disks are always refused.' };
     }
     if (process.platform === 'darwin') {
       const { stdout } = await command('df', ['-P', card]);
@@ -222,6 +238,7 @@ async function formatCard(source, label) {
     if (stdout.trim() !== 'FAT32') throw new Error('Windows did not confirm the FAT32 format.');
     return root;
   }
+  await assertSafeLinuxSource(source);
   // Explicit confirmation happens in the renderer before this IPC call.
   // udisksctl uses the desktop's polkit agent and does not require a root
   // umount. This avoids pkexec's non-interactive authorization failure.
@@ -259,11 +276,9 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
   if (!device) throw new Error('Unknown device.');
   if (!device.stock) throw new Error(`${device.label} backup is not configured yet. Open the stock-backup page to choose the correct revision.`);
   cancelled = false;
-  if (process.platform === 'win32') {
-    const verified = await inspectCard(card);
-    if (!verified.formatSupported || verified.source !== source) throw new Error(verified.hint || 'The selected SD card could not be verified again.');
-    source = verified.source;
-  }
+  const verified = await inspectCard(card);
+  if (!verified.formatSupported || verified.source !== source) throw new Error(verified.hint || 'The selected SD card could not be verified again.');
+  source = verified.source;
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'treefrog-installer-'));
   try {
     progress('Checking cached stock backup…', 8);
@@ -307,11 +322,9 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
 async function update({ deviceId, card, source, preRelease }) {
-  if (process.platform === 'win32') {
-    const verified = await inspectCard(card);
-    if (!verified.formatSupported || verified.source !== source) throw new Error(verified.hint || 'The selected SD card could not be verified again.');
-    source = verified.source;
-  }
+  const verified = await inspectCard(card);
+  if (!verified.formatSupported || verified.source !== source) throw new Error(verified.hint || 'The selected SD card could not be verified again.');
+  source = verified.source;
   const status = await checkUpdate({ card, preRelease });
   if (status.legacy) throw new Error('This card is running a build without a version marker. Please install the latest TreeFrogUI release first.');
   if (!status.available) return { updated: false, current: status.current, release: status.release?.tag || null, reason: status.reason };

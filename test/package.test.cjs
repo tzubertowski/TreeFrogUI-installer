@@ -3,7 +3,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { isSafeWindowsVolume, windowsDriveRoot } = require('../platform.cjs');
+const { isSafeLinuxBlockDevice, isSafeWindowsVolume, windowsDriveRoot } = require('../platform.cjs');
 
 const root = path.resolve(__dirname, '..');
 
@@ -53,4 +53,25 @@ test('Windows safety gate rejects boot, system, and fixed volumes', () => {
   assert.equal(isSafeWindowsVolume({ BusType: 'SATA', DriveType: 'Fixed', IsBoot: false, IsSystem: false }), false);
   assert.equal(isSafeWindowsVolume({ BusType: 'USB', DriveType: 'Removable', IsBoot: true, IsSystem: false }), false);
   assert.equal(isSafeWindowsVolume({ BusType: 'USB', DriveType: 'Removable', IsBoot: false, IsSystem: true }), false);
+});
+
+test('Linux safety gate accepts removable SD partitions and rejects system storage', () => {
+  const devices = [
+    { path: '/dev/sdg', type: 'disk', rm: true, tran: 'usb', mountpoints: [], pkname: null },
+    { path: '/dev/sdg1', type: 'part', rm: true, tran: null, mountpoints: ['/run/media/user/R36HD'], pkname: 'sdg' },
+    { path: '/dev/nvme0n1', type: 'disk', rm: false, tran: 'nvme', mountpoints: [], pkname: null },
+    { path: '/dev/nvme0n1p2', type: 'part', rm: false, tran: 'nvme', mountpoints: ['/'], pkname: 'nvme0n1' }
+  ];
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/sdg1'), true);
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/nvme0n1p2'), false);
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/sdg'), false);
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/missing1'), false);
+});
+
+test('Linux safety gate rejects a removable disk carrying a system mount', () => {
+  const devices = [
+    { path: '/dev/sdz', type: 'disk', rm: true, tran: 'usb', mountpoints: [], pkname: null },
+    { path: '/dev/sdz1', type: 'part', rm: true, tran: null, mountpoints: ['/boot'], pkname: 'sdz' }
+  ];
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/sdz1'), false);
 });
