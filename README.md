@@ -10,8 +10,8 @@ The guided flow:
 3. Confirm the destructive FAT32 format.
 4. Download and restore the matching stock backup, then overlay the latest TreeFrogUI release and device boot overlay.
 
-R36HD intentionally restores the proven R36SX v2.6 stock base before applying
-its dedicated R36HD overlay. The factory R36HD/R36SX v2.7 protected menu binary
+R36HD restores its known-working stock boot/menu base before applying the
+proven R36SX TreeFrogUI overlay. The factory R36HD/R36SX v2.7 protected menu binary
 does not reach the TreeFrogUI hook and stalls at the boot logo.
 
 Formatting is supported on Linux through `pkexec`, `mkfs.vfat`, and `udisksctl`, and on Windows through the built-in Storage PowerShell module. Windows fresh installs must be run as Administrator. The app only accepts removable USB/SD volumes on Windows, always shows the exact device, and asks for confirmation immediately before erasing it. Archive extraction uses a bundled 7-Zip executable; users do not need to install it separately.
