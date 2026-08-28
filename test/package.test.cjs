@@ -68,6 +68,16 @@ test('Linux safety gate accepts removable SD partitions and rejects system stora
   assert.equal(isSafeLinuxBlockDevice(devices, '/dev/missing1'), false);
 });
 
+test('Linux safety gate accepts a removable whole-disk filesystem used by SF3000', () => {
+  const devices = [
+    { path: '/dev/sdn', type: 'disk', fstype: 'vfat', label: 'SF3000', rm: true,
+      tran: 'usb', mountpoints: ['/run/media/user/SF3000'], pkname: null }
+  ];
+  assert.equal(isSafeLinuxBlockDevice(devices, '/dev/sdn'), true);
+  assert.equal(isSafeLinuxBlockDevice([{ ...devices[0], fstype: null }], '/dev/sdn'), false);
+  assert.equal(isSafeLinuxBlockDevice([{ ...devices[0], rm: false }], '/dev/sdn'), false);
+});
+
 test('Linux safety gate rejects a removable disk carrying a system mount', () => {
   const devices = [
     { path: '/dev/sdz', type: 'disk', rm: true, tran: 'usb', mountpoints: [], pkname: null },
