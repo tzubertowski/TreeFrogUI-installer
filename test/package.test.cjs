@@ -31,11 +31,11 @@ test('release workflow packages Linux, Windows, and macOS', () => {
   for (const platform of ['ubuntu-latest', 'windows-latest', 'macos-latest']) assert.match(workflow, new RegExp(platform));
 });
 
-test('R36HD uses the R36SX v2.6 base with its dedicated overlay', () => {
+test('R36HD uses the R36SX v2.6 base and proven R36SX overlay', () => {
   const main = fs.readFileSync(path.join(root, 'main.cjs'), 'utf8');
   const v26Url = 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z';
   assert.match(main, new RegExp(`r36sx26:.*install: 'r36sx'.*stock: '${v26Url.replaceAll('.', '\\.')}'`));
-  assert.match(main, new RegExp(`r36hd:.*install: 'r36hd'.*stock: '${v26Url.replaceAll('.', '\\.')}'`));
+  assert.match(main, new RegExp(`r36hd:.*install: 'r36sx'.*stock: '${v26Url.replaceAll('.', '\\.')}'`));
   assert.doesNotMatch(main, /R36HD_stock\.7z/);
 });
 
