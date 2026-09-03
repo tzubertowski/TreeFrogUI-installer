@@ -116,11 +116,15 @@ async function inspectCard(card) {
       const { stdout } = await command('findmnt', ['-J', '-T', card, '-o', 'SOURCE,TARGET']);
       const mount = JSON.parse(stdout).filesystems?.[0];
       const source = mount?.source;
-      const selectedRoot = await fsp.realpath(card);
       const mountRoot = mount?.target ? await fsp.realpath(mount.target) : null;
       const blockDevices = await linuxBlockDevices();
       const device = blockDevices.find((item) => item.path === source);
-      const safe = selectedRoot === mountRoot && isSafeLinuxBlockDevice(blockDevices, source);
+      /* findmnt already resolves the selected directory to its mounted source.
+       * Requiring the desktop chooser's path to byte-match the mount target
+       * rejects perfectly safe cards when the file portal returns a symlinked
+       * or canonicalised path (notably whole-disk FAT32 SF3000 cards). The
+       * source still has to pass the removable/non-system safety gate. */
+      const safe = Boolean(mountRoot) && isSafeLinuxBlockDevice(blockDevices, source);
       const size = device?.size ? `${(device.size / 1e9).toFixed(1)} GB` : 'size unknown';
       const details = [device?.label, device?.fstype, size, device?.model].filter(Boolean).join(' · ');
       return { card: mountRoot || card, source, platform: process.platform, details, formatSupported: safe,
