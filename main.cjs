@@ -30,7 +30,7 @@ let cancelled = false;
 function send(channel, payload) { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); }
 function progress(message, percent) { send('install:progress', { message, percent }); }
 function createWindow() {
-  win = new BrowserWindow({ width: 900, height: 720, minWidth: 700, minHeight: 600, backgroundColor: '#101318', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  win = new BrowserWindow({ width: 900, height: 720, minWidth: 700, minHeight: 600, backgroundColor: '#101318', icon: path.join(__dirname, 'assets', 'treefrog-icon.png'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'index.html'));
 }
