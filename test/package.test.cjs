@@ -39,6 +39,19 @@ test('R36HD uses its stock base and proven R36SX overlay', () => {
   assert.match(main, new RegExp(`r36hd:.*install: 'r36sx'.*stock: '${r36hdUrl.replaceAll('.', '\\.')}'`));
 });
 
+test('Installer exposes both Ports Collection archives for install and update', () => {
+  const main = fs.readFileSync(path.join(root, 'main.cjs'), 'utf8');
+  const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(main, /TreeFrogUI-Ports-standalone\.zip/);
+  assert.match(main, /TreeFrogUI-Ports-requiring-game-data\.zip/);
+  assert.match(main, /await installPortArchives\(portArchives, mount, work\)/);
+  assert.match(main, /await installPortArchives\(portArchives, card, work\)/);
+  assert.match(renderer, /requiringGameData: \$\('ports-game-data'\)\.checked/);
+  assert.match(html, /id="ports-standalone"/);
+  assert.match(html, /id="ports-game-data"/);
+});
+
 test('Windows card selection accepts only a drive root', () => {
   assert.equal(windowsDriveRoot('E:\\'), 'E:\\');
   assert.equal(windowsDriveRoot('e:/'), 'e:\\');

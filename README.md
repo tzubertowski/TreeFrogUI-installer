@@ -8,7 +8,7 @@ The guided flow:
    its own hardware profile and device overlay).
 2. Select the mounted SD card.
 3. Confirm the destructive FAT32 format.
-4. Download and restore the matching stock backup, then overlay the latest TreeFrogUI release and device boot overlay.
+4. Download and restore the matching stock backup, then overlay the latest TreeFrogUI release and device boot overlay. Optionally install standalone ports, ports requiring game data, or both from the Ports Collection release.
 
 R36HD restores its known-working stock boot/menu base before applying the
 proven R36SX TreeFrogUI overlay. The factory R36HD/R36SX v2.7 protected menu binary
@@ -17,6 +17,11 @@ does not reach the TreeFrogUI hook and stalls at the boot logo.
 Formatting is supported on Linux through `pkexec`, `mkfs.vfat`, and `udisksctl`, and on Windows through the built-in Storage PowerShell module. Windows fresh installs must be run as Administrator. The app only accepts removable USB/SD volumes on Windows, always shows the exact device, and asks for confirmation immediately before erasing it. Archive extraction uses a bundled 7-Zip executable; users do not need to install it separately.
 
 After installation, the app links to [Scraper Mini for TreeFrogUI](https://github.com/tzubertowski/mini-scraper-cfw/releases) for box art, screenshots, and title screens.
+
+Port archives include their launchers, cores, metadata, and box art. The
+requiring-game-data archive never includes copyrighted game files; use each
+port's missing-files prompt and setup guide to supply those separately. The same
+port choices are available when updating an existing card.
 
 ## Development
 

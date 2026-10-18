@@ -3,7 +3,8 @@ const steps = ['step-1', 'step-2', 'step-3', 'step-progress', 'step-4'];
 let devices = {}; let inspection = null; let busy = false; let updateStatus = null;
 function showStep(id) { for (const step of steps) $(step).classList.toggle('hidden', step !== id); const active = steps.indexOf(id) + 1; document.querySelectorAll('[data-step-dot]').forEach((dot) => dot.classList.toggle('active', Number(dot.dataset.stepDot) === Math.min(active, 4))); }
 function error(message) { $('error').textContent = message || ''; $('error').classList.toggle('hidden', !message); }
-function refresh() { $('start').disabled = busy || !inspection?.formatSupported || ($('operation').value === 'update' && !updateStatus?.available); }
+function portsSelected() { return $('ports-standalone').checked || $('ports-game-data').checked; }
+function refresh() { $('start').disabled = busy || !inspection?.formatSupported || ($('operation').value === 'update' && !updateStatus?.available && !portsSelected()); }
 async function boot() {
   devices = await window.treefrogInstaller.devices();
   for (const [id, value] of Object.entries(devices)) { const option = document.createElement('option'); option.value = id; option.textContent = value.label; $('device').append(option); }
@@ -18,6 +19,8 @@ async function boot() {
     refresh();
   }
   $('operation').onchange = updateOperationUI;
+  $('ports-standalone').onchange = refresh;
+  $('ports-game-data').onchange = refresh;
   async function updateReleasePreview() {
     const preRelease = $('release-channel').value === 'prerelease';
     $('release-preview').textContent = 'Checking available releases…';
@@ -28,6 +31,9 @@ async function boot() {
   }
   $('release-channel').onchange = updateReleasePreview;
   updateReleasePreview();
+  window.treefrogInstaller.latestPortsRelease().then((release) => {
+    $('ports-preview').textContent = `Latest Ports Collection: ${release.tag}. Game data must be supplied separately.`;
+  }).catch((cause) => { $('ports-preview').textContent = cause.message || String(cause); });
   $('next-device').onclick = () => showStep('step-2');
   $('back-card').onclick = () => showStep('step-1');
   $('back-install').onclick = () => showStep('step-2');
@@ -53,18 +59,18 @@ async function boot() {
     $('install-warning').classList.toggle('hidden', update);
     $('install-danger').classList.toggle('hidden', update);
     $('update-note').classList.toggle('hidden', !update);
-    $('start').textContent = update ? 'Update TreeFrogUI' : 'Format and install';
+    $('start').textContent = update ? (updateStatus?.available ? 'Update and install ports' : 'Install selected ports') : 'Format and install';
     showStep('step-3'); refresh();
   };
   $('start').onclick = async () => {
     if (!inspection?.formatSupported) return;
     const update = $('operation').value === 'update';
     if (update) {
-      if (!updateStatus?.available) return;
+      if (!updateStatus?.available && !portsSelected()) return;
       busy = true; showStep('step-progress'); error('');
       try {
-        const result = await window.treefrogInstaller.update({ deviceId: $('device').value, card: $('card').value, source: inspection.source, preRelease: $('release-channel').value === 'prerelease' });
-        $('done-message').textContent = `${result.updated ? `Updated to ${result.release}.` : 'No update was needed.'} ${result.ejected ? 'The SD card was ejected safely.' : 'Please eject the SD card manually.'}`;
+        const result = await window.treefrogInstaller.update({ deviceId: $('device').value, card: $('card').value, source: inspection.source, preRelease: $('release-channel').value === 'prerelease', ports: { standalone: $('ports-standalone').checked, requiringGameData: $('ports-game-data').checked } });
+        $('done-message').textContent = `${result.updated ? `Updated to ${result.release}.` : 'TreeFrogUI was already current.'} ${portsSelected() ? 'Selected ports installed.' : ''} ${result.ejected ? 'The SD card was ejected safely.' : 'Please eject the SD card manually.'}`;
         showStep('step-4');
       } catch (cause) { busy = false; showStep('step-3'); error(cause.message || String(cause)); refresh(); }
       return;
@@ -72,7 +78,7 @@ async function boot() {
     if (!window.confirm(`WARNING: stock SD cards are often low quality and fail. Use a fresh quality card if possible.\n\nIf you are reusing the stock card, back up its files first.\n\nERASE ${inspection.source}\nThis permanently formats the selected SD card as FAT32. Continue?`)) return;
     busy = true; showStep('step-progress'); error('');
     try {
-      const result = await window.treefrogInstaller.start({ deviceId: $('device').value, card: $('card').value, source: inspection.source, confirmed: true, preRelease: $('release-channel').value === 'prerelease' });
+      const result = await window.treefrogInstaller.start({ deviceId: $('device').value, card: $('card').value, source: inspection.source, confirmed: true, preRelease: $('release-channel').value === 'prerelease', ports: { standalone: $('ports-standalone').checked, requiringGameData: $('ports-game-data').checked } });
       $('done-message').textContent = `${result.device} is ready. ${result.ejected ? 'The SD card was ejected safely.' : 'Please eject the SD card manually.'} Installed ${result.release}.`;
       showStep('step-4');
     } catch (cause) { busy = false; showStep('step-3'); error(cause.message || String(cause)); refresh(); }

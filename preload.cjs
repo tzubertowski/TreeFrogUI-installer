@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('treefrogInstaller', {
   chooseCard: () => ipcRenderer.invoke('card:choose'),
   inspectCard: (card) => ipcRenderer.invoke('card:inspect', card),
   latestRelease: (preRelease) => ipcRenderer.invoke('release:latest', preRelease),
+  latestPortsRelease: () => ipcRenderer.invoke('ports:latest'),
   checkUpdate: (input) => ipcRenderer.invoke('update:check', input),
   start: (input) => ipcRenderer.invoke('install:start', input),
   update: (input) => ipcRenderer.invoke('update:start', input),

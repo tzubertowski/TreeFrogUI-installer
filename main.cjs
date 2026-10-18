@@ -64,7 +64,7 @@ function cacheName(value) { return crypto.createHash('sha256').update(value).dig
 async function cachedDownload(url, category, identity, onProgress) {
   const directory = path.join(app.getPath('userData'), 'cache', category);
   await fsp.mkdir(directory, { recursive: true });
-  const extension = category === 'releases' ? '.zip' : '.bin';
+  const extension = ['releases', 'ports'].includes(category) ? '.zip' : '.bin';
   const target = path.join(directory, `${cacheName(identity)}${extension}`);
   const markerPath = `${target}.json`;
   let remoteMarker = url;
@@ -171,6 +171,40 @@ async function latestRelease(preRelease = false) {
     updateName: update?.name || null, updateUrl: update?.browser_download_url || null,
     prerelease: Boolean(release.prerelease) };
 }
+async function latestPortsRelease() {
+  const response = await fetch('https://api.github.com/repos/tzubertowski/TreeFrogUI_PortsCollection/releases/latest', {
+    headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) throw new Error(`Ports release lookup failed (${response.status})`);
+  const release = await response.json();
+  const assets = new Map(release.assets.map((asset) => [asset.name, asset.browser_download_url]));
+  const standalone = assets.get('TreeFrogUI-Ports-standalone.zip');
+  const requiringGameData = assets.get('TreeFrogUI-Ports-requiring-game-data.zip');
+  if (!standalone || !requiringGameData) throw new Error('The latest Ports Collection release is missing one of its two archives.');
+  return { tag: release.tag_name, standalone, requiringGameData };
+}
+async function selectedPortArchives(selection) {
+  const names = [];
+  if (selection?.standalone) names.push('standalone');
+  if (selection?.requiringGameData) names.push('requiringGameData');
+  if (!names.length) return [];
+  const release = await latestPortsRelease();
+  return Promise.all(names.map(async (name) => {
+    const url = release[name];
+    const archiveName = name === 'standalone' ? 'TreeFrogUI-Ports-standalone.zip' : 'TreeFrogUI-Ports-requiring-game-data.zip';
+    const cached = await cachedDownload(url, 'ports', `${release.tag}-${archiveName}`,
+      ({ received, total }) => progress(`Downloading ${archiveName}… ${Math.round(received / 1048576)}${total ? ` / ${Math.round(total / 1048576)}` : ''} MB`, 35));
+    return { ...cached, name: archiveName };
+  }));
+}
+async function installPortArchives(archives, card, work) {
+  for (const [index, archive] of archives.entries()) {
+    const directory = path.join(work, `ports-${index}`);
+    await fsp.mkdir(directory);
+    await extractArchive(archive.path, directory);
+    await copyTree(directory, card, (file) => progress(`Installing ports… ${path.basename(file)}`, 92));
+  }
+}
 function versionParts(value) {
   const match = String(value || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[_-]?([a-z0-9]+))?$/i);
   if (!match) return null;
@@ -276,7 +310,7 @@ async function ejectCard(source) {
     return true;
   } catch (error) { progress('Installation complete — eject the SD card manually.', 99); return false; }
 }
-async function install({ deviceId, card, source, confirmed, preRelease }) {
+async function install({ deviceId, card, source, confirmed, preRelease, ports }) {
   if (!confirmed) throw new Error('Formatting was not confirmed.');
   const device = devices[deviceId];
   if (!device) throw new Error('Unknown device.');
@@ -298,6 +332,8 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     const releaseCache = await cachedDownload(release.url, 'releases', release.name, ({ received, total }) => progress(`Downloading TreeFrogUI ${release.tag}… ${Math.round(received / 1048576)}${total ? ` / ${Math.round(total / 1048576)}` : ''} MB`, total ? Math.min(35, 25 + (received / total) * 10) : 30));
     const treefrogArchive = releaseCache.path;
     progress(releaseCache.cached ? `Using cached ${release.tag} release.` : `Downloaded ${release.tag} release.`, 30);
+    const portArchives = await selectedPortArchives(ports);
+    if (cancelled) throw new Error('Installation cancelled.');
     progress('Formatting the SD card (FAT32)…', 38);
     let mount;
     try { mount = await formatCard(source, device.labelName); } catch (error) {
@@ -321,55 +357,59 @@ async function install({ deviceId, card, source, confirmed, preRelease }) {
     const deviceOverlay = path.join(releaseRoot, 'install_first', device.install);
     if (!fs.existsSync(deviceOverlay)) throw new Error(`The TreeFrogUI release has no ${device.install} device overlay.`);
     await copyTree(deviceOverlay, mount, (file) => progress(`Applying ${device.label} boot files… ${path.basename(file)}`, 94));
+    await installPortArchives(portArchives, mount, work);
     progress('Ejecting the SD card…', 97);
     const ejected = await ejectCard(source);
     progress('Finished — enjoy TreeFrogUI!', 100);
     return { release: release.tag, mount, device: device.label, prerelease: release.prerelease, ejected };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
-async function update({ deviceId, card, source, preRelease }) {
+async function update({ deviceId, card, source, preRelease, ports }) {
   const verified = await inspectCard(card);
   if (!verified.formatSupported || verified.source !== source) throw new Error(verified.hint || 'The selected SD card could not be verified again.');
   source = verified.source;
   const status = await checkUpdate({ card, preRelease });
   if (status.legacy) throw new Error('This card is running a build without a version marker. Please install the latest TreeFrogUI release first.');
-  if (!status.available) return { updated: false, current: status.current, release: status.release?.tag || null, reason: status.reason };
-  if (!status.release.updateUrl) throw new Error(`TreeFrogUI ${status.release.tag} does not provide an update archive yet. Install the full release instead.`);
+  const portArchives = await selectedPortArchives(ports);
+  if (!status.available && !portArchives.length) return { updated: false, current: status.current, release: status.release?.tag || null, reason: status.reason };
+  if (status.available && !status.release.updateUrl) throw new Error(`TreeFrogUI ${status.release.tag} does not provide an update archive yet. Install the full release instead.`);
   cancelled = false;
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'treefrog-update-'));
   try {
-    progress(`Downloading TreeFrogUI ${status.release.tag} update…`, 12);
-    const archive = await cachedDownload(status.release.updateUrl, 'releases', `${status.release.tag}-${status.release.updateName}`, ({ received, total }) => progress(`Downloading TreeFrogUI ${status.release.tag} update… ${Math.round(received / 1048576)}${total ? ` / ${Math.round(total / 1048576)}` : ''} MB`, total ? Math.min(25, 12 + (received / total) * 13) : 18));
-    progress('Downloaded update archive.', 25);
-    const unpacked = path.join(work, 'update'); await fsp.mkdir(unpacked); await extractArchive(archive.path, unpacked);
-    const root = path.join(unpacked, 'treefrog-update');
-    if (!fs.existsSync(root)) throw new Error('The update archive has an invalid layout.');
-    if (!root || path.basename(root) !== 'treefrog-update') throw new Error('The update archive has an invalid layout.');
-    const manifest = await fsp.readFile(path.join(root, 'manifest.txt'), 'utf8').catch(() => '');
-    if (!new RegExp(`(?:^|\\n)version=${status.release.tag.replace(/^v/i, '')}(?:\\n|$)`).test(manifest)) throw new Error('The update archive version does not match the selected release.');
-    const payload = path.join(root, 'payload');
-    let files = 0;
-    if (fs.existsSync(payload)) await copyTree(payload, card, (file) => { files += 1; progress(`Updating TreeFrogUI… ${path.basename(file)}`, Math.min(78, 28 + files / 3)); });
-    const deletes = async (file) => {
+    if (status.available) {
+      progress(`Downloading TreeFrogUI ${status.release.tag} update…`, 12);
+      const archive = await cachedDownload(status.release.updateUrl, 'releases', `${status.release.tag}-${status.release.updateName}`, ({ received, total }) => progress(`Downloading TreeFrogUI ${status.release.tag} update… ${Math.round(received / 1048576)}${total ? ` / ${Math.round(total / 1048576)}` : ''} MB`, total ? Math.min(25, 12 + (received / total) * 13) : 18));
+      progress('Downloaded update archive.', 25);
+      const unpacked = path.join(work, 'update'); await fsp.mkdir(unpacked); await extractArchive(archive.path, unpacked);
+      const root = path.join(unpacked, 'treefrog-update');
+      if (!fs.existsSync(root)) throw new Error('The update archive has an invalid layout.');
+      const manifest = await fsp.readFile(path.join(root, 'manifest.txt'), 'utf8').catch(() => '');
+      if (!new RegExp(`(?:^|\\n)version=${status.release.tag.replace(/^v/i, '')}(?:\\n|$)`).test(manifest)) throw new Error('The update archive version does not match the selected release.');
+      const payload = path.join(root, 'payload');
+      let files = 0;
+      if (fs.existsSync(payload)) await copyTree(payload, card, (file) => { files += 1; progress(`Updating TreeFrogUI… ${path.basename(file)}`, Math.min(78, 28 + files / 3)); });
+      const deletes = async (file) => {
       if (!fs.existsSync(file)) return;
       for (const relative of (await fsp.readFile(file, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
         if (relative.includes('..') || path.isAbsolute(relative)) continue;
         await fsp.rm(path.join(card, relative), { recursive: true, force: true });
       }
-    };
-    await deletes(path.join(root, 'delete.txt'));
-    const device = devices[deviceId];
-    if (!device) throw new Error('Choose your device before updating.');
-    const deviceRoot = path.join(root, 'device', device.install);
-    if (fs.existsSync(deviceRoot)) {
-      const devicePayload = path.join(deviceRoot, 'cubegm');
-      if (fs.existsSync(devicePayload)) await copyTree(devicePayload, path.join(card, 'cubegm'), (file) => progress(`Applying ${device.label} update… ${path.basename(file)}`, 84));
-      await deletes(path.join(deviceRoot, 'delete.txt'));
+      };
+      await deletes(path.join(root, 'delete.txt'));
+      const device = devices[deviceId];
+      if (!device) throw new Error('Choose your device before updating.');
+      const deviceRoot = path.join(root, 'device', device.install);
+      if (fs.existsSync(deviceRoot)) {
+        const devicePayload = path.join(deviceRoot, 'cubegm');
+        if (fs.existsSync(devicePayload)) await copyTree(devicePayload, path.join(card, 'cubegm'), (file) => progress(`Applying ${device.label} update… ${path.basename(file)}`, 84));
+        await deletes(path.join(deviceRoot, 'delete.txt'));
+      }
     }
+    await installPortArchives(portArchives, card, work);
     progress('Ejecting the SD card…', 96);
     const ejected = await ejectCard(source);
     progress('Update complete.', 100);
-    return { updated: true, current: status.current, release: status.release.tag, ejected };
+    return { updated: status.available, current: status.current, release: status.release?.tag || null, ejected };
   } finally { await fsp.rm(work, { recursive: true, force: true }); }
 }
 
@@ -379,6 +419,7 @@ app.whenReady().then(() => {
   ipcMain.handle('card:choose', chooseCard);
   ipcMain.handle('card:inspect', (_event, card) => inspectCard(card));
   ipcMain.handle('release:latest', (_event, preRelease) => latestRelease(preRelease === true));
+  ipcMain.handle('ports:latest', latestPortsRelease);
   ipcMain.handle('update:check', (_event, input) => checkUpdate(input));
   ipcMain.handle('install:start', (_event, input) => install(input));
   ipcMain.handle('update:start', (_event, input) => update(input));
