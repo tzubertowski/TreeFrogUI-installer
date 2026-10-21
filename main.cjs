@@ -13,13 +13,14 @@ const { isSafeLinuxBlockDevice, isSafeWindowsVolume, windowsDriveRoot } = requir
 const execFileAsync = promisify(execFile);
 
 const devices = {
-  r36sx26: { label: 'R36SX · v2.6', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z' },
-  r36sx27: { label: 'R36SX · v2.7', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.7_stock.7z' },
+  r36sx27: { label: 'R36SX · v2.7', description: 'No HDMI output. The sticker usually says R36S; the boot logo says R36SX and may show v2.6 or v2.7. Try v2.7 first; if it does not boot, try R36SX v2.6.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.7_stock.7z' },
+  r36sx26: { label: 'R36SX · v2.6', description: 'No HDMI output. The sticker usually says R36S; the boot logo says R36SX and may show v2.6 or v2.7. Choose v2.6 if R36SX v2.7 does not boot.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z' },
   // R36HD needs its own stock boot/menu binary.  Apply the proven R36SX hook
   // (including its driver fallback) on top of that known-working base.
-  r36hd: { label: 'R36HD', family: 'R36HD', install: 'r36sx', labelName: 'R36HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36HD_stock.7z' },
+  r36hd: { label: 'R36HD', description: 'Similar to R36SX, but has a mini HDMI port on top.', family: 'R36HD', install: 'r36sx', labelName: 'R36HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36HD_stock.7z' },
   sf3000: { label: 'SF3000', family: 'SF3000', install: 'sf3000', labelName: 'SF3000', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000_stock.7z' },
-  sf3000hd: { label: 'SF3000 HD', family: 'SF3500', install: 'sf3000hd', labelName: 'SF3000HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000_HD_stock.7z' },
+  sf3000hd: { label: 'SF3000HD — with HDMI', description: 'Looks like the SF3000, but has a mini HDMI output on top.', family: 'SF3500', install: 'sf3000hd', labelName: 'SF3000HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000_HD_stock.7z' },
+  sf3000hd_nohdmi: { label: 'SF3000HD — without HDMI', description: 'The sticker says SF3000HD, but this model has no mini HDMI output. Choose this option only for the version without HDMI.', family: 'SF3000', install: 'sf3000hd_nohdmi', labelName: 'SF3000HD', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3000HD_without_HDMI_stock.7z' },
   sf3100: { label: 'SF3100', family: 'SF3500', install: 'sf3100', labelName: 'SF3100', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3100_stock.7z' },
   sf3500: { label: 'SF3500', family: 'SF3500', install: 'sf3500', labelName: 'SF3500', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/SF3500_stock.7z', stockPage: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/tag/stock-backups-v1' },
   gb350: { label: 'GB350', family: 'GB350', install: 'gb350', labelName: 'GB350', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/GB350_stock.7z' }
@@ -354,7 +355,9 @@ async function install({ deviceId, card, source, confirmed, preRelease, ports })
     const releaseRoot = await archiveRoot(tfDir); if (!releaseRoot) throw new Error('The TreeFrogUI archive has no release/ payload.');
     let releaseFiles = 0;
     await copyTree(releaseRoot, mount, (file) => { releaseFiles += 1; progress(`Installing TreeFrogUI… ${path.basename(file)}`, Math.min(90, 76 + releaseFiles / 20)); });
-    const deviceOverlay = path.join(releaseRoot, 'install_first', device.install);
+    const releaseOverlay = path.join(releaseRoot, 'install_first', device.install);
+    const bundledOverlay = path.join(__dirname, 'assets', 'device-overlays', device.install);
+    const deviceOverlay = fs.existsSync(releaseOverlay) ? releaseOverlay : bundledOverlay;
     if (!fs.existsSync(deviceOverlay)) throw new Error(`The TreeFrogUI release has no ${device.install} device overlay.`);
     await copyTree(deviceOverlay, mount, (file) => progress(`Applying ${device.label} boot files… ${path.basename(file)}`, 94));
     await installPortArchives(portArchives, mount, work);
@@ -425,5 +428,7 @@ app.whenReady().then(() => {
   ipcMain.handle('update:start', (_event, input) => update(input));
   ipcMain.handle('install:cancel', () => { cancelled = true; });
   ipcMain.handle('stock:open', (_event, id) => shell.openExternal(devices[id]?.stockPage || devices[id]?.stock || 'https://github.com/tzubertowski/treefrog-ui/blob/main/install.md'));
+  ipcMain.handle('ports:open', () => shell.openExternal('https://github.com/tzubertowski/TreeFrogUI_PortsCollection/releases'));
+  ipcMain.handle('site:open', () => shell.openExternal('http://treefrogui.github.io/'));
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

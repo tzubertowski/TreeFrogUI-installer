@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('treefrogInstaller', {
   update: (input) => ipcRenderer.invoke('update:start', input),
   cancel: () => ipcRenderer.invoke('install:cancel'),
   openStock: (id) => ipcRenderer.invoke('stock:open', id),
+  openPorts: () => ipcRenderer.invoke('ports:open'),
+  openWebsite: () => ipcRenderer.invoke('site:open'),
   onProgress: (listener) => { const handler = (_event, value) => listener(value); ipcRenderer.on('install:progress', handler); return () => ipcRenderer.removeListener('install:progress', handler); }
 });

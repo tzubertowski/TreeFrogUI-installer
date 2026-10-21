@@ -39,6 +39,32 @@ test('R36HD uses its stock base and proven R36SX overlay', () => {
   assert.match(main, new RegExp(`r36hd:.*install: 'r36sx'.*stock: '${r36hdUrl.replaceAll('.', '\\.')}'`));
 });
 
+test('device picker includes identification notes and the no-HDMI SF3000HD profile', () => {
+  const main = fs.readFileSync(path.join(root, 'main.cjs'), 'utf8');
+  const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(main, /r36sx27: \{ label: 'R36SX · v2\.7', description: 'No HDMI output\. The sticker usually says R36S; the boot logo says R36SX/);
+  assert.match(main, /r36sx26: \{ label: 'R36SX · v2\.6', description: 'No HDMI output\. The sticker usually says R36S; the boot logo says R36SX/);
+  assert.match(main, /r36hd: \{ label: 'R36HD', description: 'Similar to R36SX, but has a mini HDMI port on top\.'/);
+  assert.match(main, /sf3000hd: \{ label: 'SF3000HD — with HDMI'/);
+  assert.match(main, /sf3000hd_nohdmi: \{ label: 'SF3000HD — without HDMI', description: 'The sticker says SF3000HD, but this model has no mini HDMI output\. Choose this option only/);
+  assert.match(main, /install: 'sf3000hd_nohdmi'.*SF3000HD_without_HDMI_stock\.7z/);
+  assert.match(html, /id="device-help" class="device-note"/);
+  assert.match(html, /id="website-link"/);
+  assert.match(main, /site:open.*http:\/\/treefrogui\.github\.io/);
+  assert.match(renderer, /devices\[\$\('device'\)\.value\]\?\.description/);
+});
+
+test('installer bundles the tested no-HDMI boot overlay as a fallback', () => {
+  const main = fs.readFileSync(path.join(root, 'main.cjs'), 'utf8');
+  const overlay = path.join(root, 'assets/device-overlays/sf3000hd_nohdmi/cubegm');
+  for (const file of ['setting.xml', 'zhijack.sh', 'xgame-logo.bmp', 'cores/libemu_md.so']) {
+    assert.ok(fs.statSync(path.join(overlay, file)).size > 0, file);
+  }
+  assert.match(main, /const releaseOverlay = path\.join\(releaseRoot, 'install_first', device\.install\)/);
+  assert.match(main, /const bundledOverlay = path\.join\(__dirname, 'assets', 'device-overlays', device\.install\)/);
+});
+
 test('Installer exposes both Ports Collection archives for install and update', () => {
   const main = fs.readFileSync(path.join(root, 'main.cjs'), 'utf8');
   const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');

@@ -8,14 +8,19 @@ function refresh() { $('start').disabled = busy || !inspection?.formatSupported 
 async function boot() {
   devices = await window.treefrogInstaller.devices();
   for (const [id, value] of Object.entries(devices)) { const option = document.createElement('option'); option.value = id; option.textContent = value.label; $('device').append(option); }
+  function updateDeviceHelp() { $('device-help').textContent = devices[$('device').value]?.description || ''; }
+  $('device').onchange = updateDeviceHelp;
+  updateDeviceHelp();
   $('stock').onclick = () => window.treefrogInstaller.openStock($('device').value);
+  $('ports-link').onclick = () => window.treefrogInstaller.openPorts();
+  $('website-link').onclick = () => window.treefrogInstaller.openWebsite();
   function updateOperationUI() {
     const update = $('operation').value === 'update';
     $('operation-help').textContent = update
       ? 'Choose your device and release channel. Updates preserve the card format, games, saves, and BIOS files.'
       : 'Choose your device and release channel. A fresh install formats the card and restores the matching stock backup.';
     $('next-device').textContent = update ? 'Continue to SD card' : 'Continue to SD card';
-    $('stock').classList.toggle('invisible', update);
+    $('stock').classList.toggle('hidden', update);
     refresh();
   }
   $('operation').onchange = updateOperationUI;
