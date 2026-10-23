@@ -1,0 +1,30 @@
+name: Post stable release to Discord
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+jobs:
+  post-stable-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_STABLE_RELEASE_WEBHOOK }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_NAME: ${{ github.event.release.name || github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body || '' }}
+        run: |
+          payload=$(jq -n \
+            --arg title "$REPOSITORY $RELEASE_NAME released" \
+            --arg url "$RELEASE_URL" \
+            --arg body "$RELEASE_BODY" \
+            '{embeds:[{title:$title,url:$url,description:($body[0:4000]),color:3066993,footer:{text:"Stable release"}}]}')
+          curl --fail-with-body --silent --show-error \
+            -H 'Content-Type: application/json' \
+            --data "$payload" \
+            "$DISCORD_WEBHOOK_URL"
