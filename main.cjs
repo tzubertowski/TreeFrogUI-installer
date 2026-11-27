@@ -12,8 +12,10 @@ const { path7za } = require('7zip-bin');
 const { isSafeLinuxBlockDevice, isSafeWindowsVolume, windowsDriveRoot } = require('./platform.cjs');
 const execFileAsync = promisify(execFile);
 
+const r36sx27Stock = 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.7_stock.7z';
 const devices = {
-  r36sx27: { label: 'R36SX · v2.7', description: 'No HDMI output. The sticker usually says R36S; the boot logo says R36SX and may show v2.6 or v2.7. Try v2.7 first; if it does not boot, try R36SX v2.6.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.7_stock.7z' },
+  r36sx27: { label: 'R36SX · v2.7', description: 'No HDMI output. The sticker usually says R36S; the boot logo says R36SX and may show v2.6 or v2.7. Try v2.7 first; if it does not boot, try R36SX v2.6.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: r36sx27Stock },
+  r36sx30: { label: 'R36SX · v3.0', description: 'Choose this if your boot logo shows R36SX v3.0. This uses the v2.7 stock backup and setup, which users have reported working on v3.0.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: r36sx27Stock },
   r36sx26: { label: 'R36SX · v2.6', description: 'No HDMI output. The sticker usually says R36S; the boot logo says R36SX and may show v2.6 or v2.7. Choose v2.6 if R36SX v2.7 does not boot.', family: 'R36SX', install: 'r36sx', labelName: 'R36SX', stock: 'https://github.com/tzubertowski/H.OS_stock_backup/releases/download/stock-backups-v1/R36SX_v2.6_stock.7z' },
   // R36HD needs its own stock boot/menu binary.  Apply the proven R36SX hook
   // (including its driver fallback) on top of that known-working base.
