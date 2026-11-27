@@ -96,6 +96,32 @@ async function cachedDownload(url, category, identity, onProgress) {
 async function command(program, args, options = {}) {
   return execFileAsync(program, args, { maxBuffer: 16 * 1024 * 1024, ...options });
 }
+function linuxSystemCommandEnv() {
+  if (process.platform !== 'linux') return process.env;
+  const env = { ...process.env };
+  // Electron/Nix shells may inject loader paths that break host tools
+  // like udisksctl with GLIBC version mismatches.
+  delete env.LD_LIBRARY_PATH;
+  delete env.NIX_LD;
+  delete env.NIX_LD_LIBRARY_PATH;
+  return env;
+}
+function linuxPkexecCommand() {
+  if (process.platform !== 'linux') return 'pkexec';
+  const wrapper = '/run/wrappers/bin/pkexec';
+  try {
+    fs.accessSync(wrapper, fs.constants.X_OK);
+    return wrapper;
+  } catch {
+    return 'pkexec';
+  }
+}
+function linuxPkexecEnv() {
+  const env = { ...linuxSystemCommandEnv() };
+  // pkexec validates SHELL against /etc/shells.
+  env.SHELL = '/bin/sh';
+  return env;
+}
 async function chooseCard() {
   const result = await dialog.showOpenDialog(win, { title: 'Select the mounted SD card', properties: ['openDirectory'] });
   return result.canceled ? null : result.filePaths[0];
@@ -158,24 +184,83 @@ async function inspectCard(card) {
       : 'Linux could not identify a mounted removable volume.';
   return { card, source: null, platform: process.platform, details: '', hint, formatSupported: false };
 }
+function githubApiHeaders() {
+  const headers = { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' };
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+function isGithubRateLimited(response) {
+  if (!response || response.status !== 403) return false;
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  if (remaining === '0') return true;
+  return false;
+}
+function githubRateLimitError(contextLabel) {
+  const hasToken = Boolean(process.env.GH_TOKEN || process.env.GITHUB_TOKEN);
+  const base = `${contextLabel} failed because GitHub API rate limit was exceeded (403).`;
+  if (hasToken) return `${base} The configured token may be missing scopes or already exhausted; try a fresh token or wait for reset.`;
+  return `${base} Set GH_TOKEN (or GITHUB_TOKEN) in the environment and restart the installer.`;
+}
+function releaseMetadataCachePath(preRelease) {
+  return path.join(app.getPath('userData'), 'cache', 'releases', preRelease ? 'latest-prerelease.json' : 'latest-stable.json');
+}
+async function readCachedReleaseMetadata(preRelease) {
+  try {
+    const file = releaseMetadataCachePath(preRelease);
+    const cached = JSON.parse(await fsp.readFile(file, 'utf8'));
+    if (!cached?.tag || !cached?.name || !cached?.url) return null;
+    return { ...cached, fromCache: true };
+  } catch {
+    return null;
+  }
+}
+async function writeCachedReleaseMetadata(preRelease, release) {
+  const file = releaseMetadataCachePath(preRelease);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, JSON.stringify({
+    tag: release.tag,
+    name: release.name,
+    url: release.url,
+    updateName: release.updateName,
+    updateUrl: release.updateUrl,
+    prerelease: release.prerelease,
+    cachedAt: new Date().toISOString()
+  }));
+}
 async function latestRelease(preRelease = false) {
-  const endpoint = preRelease ? 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases?per_page=30' : 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest';
-  const response = await fetch(endpoint, { headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
-  if (!response.ok) throw new Error(`TreeFrogUI release lookup failed (${response.status})`);
-  const releases = await response.json();
-  const release = preRelease ? releases.find((item) => item.prerelease && !item.draft) : releases;
-  if (!release) throw new Error('No TreeFrogUI prerelease is currently available.');
-  const asset = release.assets.find((item) => /^TreeFrogUI_.*\.zip$/i.test(item.name));
-  if (!asset) throw new Error('The latest TreeFrogUI release has no full installation ZIP.');
-  const update = release.assets.find((item) => /^update\.zip$/i.test(item.name));
-  return { tag: release.tag_name, name: asset.name, url: asset.browser_download_url,
-    updateName: update?.name || null, updateUrl: update?.browser_download_url || null,
-    prerelease: Boolean(release.prerelease) };
+  try {
+    const endpoint = preRelease ? 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases?per_page=30' : 'https://api.github.com/repos/tzubertowski/treefrog-ui/releases/latest';
+    const response = await fetch(endpoint, { headers: githubApiHeaders(), signal: AbortSignal.timeout(15000) });
+    if (isGithubRateLimited(response)) throw new Error(githubRateLimitError('TreeFrogUI release lookup'));
+    if (!response.ok) throw new Error(`TreeFrogUI release lookup failed (${response.status})`);
+    const releases = await response.json();
+    const release = preRelease ? releases.find((item) => item.prerelease && !item.draft) : releases;
+    if (!release) throw new Error('No TreeFrogUI prerelease is currently available.');
+    const asset = release.assets.find((item) => /^TreeFrogUI_.*\.zip$/i.test(item.name));
+    if (!asset) throw new Error('The latest TreeFrogUI release has no full installation ZIP.');
+    const update = release.assets.find((item) => /^update\.zip$/i.test(item.name));
+    const resolved = {
+      tag: release.tag_name,
+      name: asset.name,
+      url: asset.browser_download_url,
+      updateName: update?.name || null,
+      updateUrl: update?.browser_download_url || null,
+      prerelease: Boolean(release.prerelease)
+    };
+    await writeCachedReleaseMetadata(preRelease, resolved);
+    return resolved;
+  } catch (error) {
+    const cached = await readCachedReleaseMetadata(preRelease);
+    if (cached) return cached;
+    throw error;
+  }
 }
 async function latestPortsRelease() {
   const response = await fetch('https://api.github.com/repos/tzubertowski/TreeFrogUI_PortsCollection/releases/latest', {
-    headers: { 'User-Agent': 'TreeFrogUI-Installer', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000)
+    headers: githubApiHeaders(), signal: AbortSignal.timeout(15000)
   });
+  if (isGithubRateLimited(response)) throw new Error(githubRateLimitError('Ports release lookup'));
   if (!response.ok) throw new Error(`Ports release lookup failed (${response.status})`);
   const release = await response.json();
   const assets = new Map(release.assets.map((asset) => [asset.name, asset.browser_download_url]));
@@ -280,16 +365,57 @@ async function formatCard(source, label) {
     return root;
   }
   await assertSafeLinuxSource(source);
+  const isPkexecUnavailable = (error) => {
+    const message = String(error?.message || error || '').toLowerCase();
+    return message.includes('pkexec must be setuid root') ||
+      message.includes('pkexec:') ||
+      message.includes('command not found') ||
+      message.includes('enoent');
+  };
+  const isGlibcMismatch = (error) => String(error?.message || error || '').includes('GLIBC_');
+  const pkexecProgram = linuxPkexecCommand();
+  const pkexecEnv = linuxPkexecEnv();
+  const sanitizeFsLabel = (value) => String(value || '')
+    .replace(/[^A-Za-z0-9_]/g, '_')
+    .replace(/^_+/, '')
+    .slice(0, 11) || 'TREEFROGUI';
+  const safeLabel = sanitizeFsLabel(label);
   // Explicit confirmation happens in the renderer before this IPC call.
   // udisksctl uses the desktop's polkit agent and does not require a root
   // umount. This avoids pkexec's non-interactive authorization failure.
   try {
-    await command('udisksctl', ['unmount', '-b', source]);
+    await command('udisksctl', ['unmount', '-b', source], { env: linuxSystemCommandEnv() });
   } catch {
-    await command('pkexec', ['umount', source]);
+    try {
+      await command(pkexecProgram, ['umount', source], { env: pkexecEnv });
+    } catch {
+      await command('umount', [source], { env: linuxSystemCommandEnv() });
+    }
   }
-  await command('pkexec', ['mkfs.vfat', '-F', '32', '-n', label, source]);
-  const { stdout, stderr } = await command('udisksctl', ['mount', '-b', source]);
+  try {
+    await command('udisksctl', ['format', '-b', source, '--type', 'vfat', '--label', safeLabel], { env: linuxSystemCommandEnv() });
+  } catch (udisksError) {
+    if (isGlibcMismatch(udisksError)) {
+      const message = udisksError instanceof Error ? udisksError.message : String(udisksError);
+      throw new Error(`udisksctl failed to start because of a host/library mismatch (GLIBC). Run the installer outside the current Nix shell, or ensure udisksctl and glibc come from the same runtime.\\nudisksctl: ${message}`);
+    }
+    try {
+      await command(pkexecProgram, ['mkfs.vfat', '-F', '32', '-n', safeLabel, source], { env: pkexecEnv });
+    } catch (pkexecError) {
+      if (isPkexecUnavailable(pkexecError)) {
+        try {
+          await command('sudo', ['-n', 'mkfs.vfat', '-F', '32', '-n', safeLabel, source], { env: linuxSystemCommandEnv() });
+        } catch {
+          const udisksMessage = udisksError instanceof Error ? udisksError.message : String(udisksError);
+          const pkexecMessage = pkexecError instanceof Error ? pkexecError.message : String(pkexecError);
+          throw new Error(`Formatting requires elevated privileges, but no working polkit/sudo path was found. Install/enable polkit (pkexec setuid root) or run from a terminal where sudo is configured.\\nudisksctl: ${udisksMessage}\\npkexec: ${pkexecMessage}`);
+        }
+      } else {
+        throw pkexecError;
+      }
+    }
+  }
+  const { stdout, stderr } = await command('udisksctl', ['mount', '-b', source], { env: linuxSystemCommandEnv() });
   const output = `${stdout}\n${stderr}`;
   const match = output.match(/\bat\s+(.+?)(?:\.\s*)?$/m);
   if (match?.[1]?.trim()) return match[1].trim();
@@ -329,6 +455,7 @@ async function install({ deviceId, card, source, confirmed, preRelease, ports })
     if (cancelled) throw new Error('Installation cancelled.');
     progress('Checking GitHub for the selected TreeFrogUI channel…', 22);
     const release = await latestRelease(preRelease === true);
+    if (release.fromCache) progress('GitHub release API unavailable — trying cached release metadata.', 23);
     progress(`Downloading TreeFrogUI ${release.tag}…`, 25);
     const releaseCache = await cachedDownload(release.url, 'releases', release.name, ({ received, total }) => progress(`Downloading TreeFrogUI ${release.tag}… ${Math.round(received / 1048576)}${total ? ` / ${Math.round(total / 1048576)}` : ''} MB`, total ? Math.min(35, 25 + (received / total) * 10) : 30));
     const treefrogArchive = releaseCache.path;
